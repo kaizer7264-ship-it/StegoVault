@@ -15,3 +15,10 @@ class CapacityError(SteganographyError):
 class FormatError(SteganographyError):
     """Raised when an unsupported or spoofed image format is provided."""
     pass
+class CryptoError(SteganographyError):
+    """Base exception for cryptographic failures."""
+    pass
+
+class AuthenticationError(CryptoError):
+    """Raised when decryption fails due to an invalid password or corrupted data."""
+    pass
