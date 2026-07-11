@@ -1,9 +1,11 @@
 """
 StegoVault Core: LSB Steganography Engine
-Implements Least Significant Bit (1-bit LSB) steganography for hiding
-UTF-8 encoded text payloads within the RGB channels of PNG images.
+A completely generic Least Significant Bit (1-bit LSB) engine.
+Embeds and extracts arbitrary binary streams (bytes) across the RGB 
+channels of PNG images.
 """
 
+import struct
 from pathlib import Path
 from typing import Generator
 from PIL import Image
@@ -14,13 +16,10 @@ from stegovault.utils.exceptions import SteganographyError, CapacityError, Forma
 
 class LSBSteganography:
     """
-    Core engine for embedding and extracting hidden UTF-8 text using 1-bit LSB.
-    Strictly accepts PNG images and verifies headers to prevent data corruption.
+    Core engine for embedding and extracting raw bytes using 1-bit LSB.
+    Strictly accepts PNG images and relies on a 4-byte length prefix 
+    for extremely fast and precise payload extraction.
     """
-
-    # Note: V1 uses a hardcoded delimiter. V2 will replace this with a structured
-    # binary header (Length, Encrypted Flag, Compressed Flag, Checksum, etc.).
-    DELIMITER: bytes = b"!!STEGO_END_EOF!!"
 
     @staticmethod
     def _validate_png(image_path: Path) -> None:
@@ -44,7 +43,6 @@ class LSBSteganography:
                 "StegoVault strictly requires .png extensions."
             )
 
-        # Verify the actual file signature/header to prevent extension spoofing
         try:
             with Image.open(image_path) as img:
                 if img.format != "PNG":
@@ -70,50 +68,50 @@ class LSBSteganography:
                 yield (byte >> (7 - i)) & 1
 
     @classmethod
-    def encode_text(
-        cls, input_image_path: Path | str, text: str, output_image_path: Path | str
+    def encode_bytes(
+        cls, input_image_path: Path | str, payload: bytes, output_image_path: Path | str
     ) -> None:
         """
-        Encodes UTF-8 text into the Least Significant Bits of a PNG image.
+        Encodes a raw byte stream into the Least Significant Bits of a PNG image.
+        Automatically prepends a 4-byte length header.
 
         Args:
             input_image_path (Path | str): Path to the carrier PNG image.
-            text (str): The secret message to hide.
+            payload (bytes): The arbitrary binary data to hide.
             output_image_path (Path | str): Path where the resulting PNG will be saved.
 
         Raises:
-            ValueError: If the input text is empty.
+            ValueError: If the payload is empty.
             FormatError: If input path is not a valid PNG.
-            CapacityError: If the text is too large for the image.
+            CapacityError: If the payload is too large for the image.
         """
-        if not text:
-            raise ValueError("Payload text cannot be empty.")
+        if not payload:
+            raise ValueError("Payload cannot be empty.")
 
         in_path = Path(input_image_path)
         out_path = Path(output_image_path)
 
         cls._validate_png(in_path)
 
-        payload_bytes = text.encode('utf-8') + cls.DELIMITER
-        payload_bits_count = len(payload_bytes) * 8
+        # Prepend a 4-byte unsigned int (>I) representing the exact payload length
+        length_header = struct.pack(">I", len(payload))
+        full_payload_bytes = length_header + payload
+        full_payload_bits_count = len(full_payload_bytes) * 8
 
         with Image.open(in_path) as img:
             encoded_img = img.convert("RGB")
             width, height = encoded_img.size
             max_bits = width * height * 3
 
-            if payload_bits_count > max_bits:
+            if full_payload_bits_count > max_bits:
                 raise CapacityError(
-                    f"Payload too large. Requires {payload_bits_count} bits, "
+                    f"Payload too large. Requires {full_payload_bits_count} bits, "
                     f"but the image can only hold {max_bits} bits."
                 )
 
-            # Using load() provides memory-efficient, in-place pixel access
             pixels = encoded_img.load()
-            bit_generator = cls._bytes_to_bits(payload_bytes)
+            bit_generator = cls._bytes_to_bits(full_payload_bytes)
 
-            # Define a helper to handle the iteration cleanly and break out early
-            # without leaving a partially written pixel behind.
             def _embed_bits() -> None:
                 for y in range(height):
                     for x in range(width):
@@ -143,19 +141,19 @@ class LSBSteganography:
             encoded_img.save(out_path, format="PNG")
 
     @classmethod
-    def decode_text(cls, input_image_path: Path | str) -> str:
+    def decode_bytes(cls, input_image_path: Path | str) -> bytes:
         """
-        Extracts hidden UTF-8 text from the Least Significant Bits of a PNG image.
+        Extracts a hidden byte stream from the Least Significant Bits of a PNG image.
 
         Args:
             input_image_path (Path | str): Path to the PNG image containing hidden data.
 
         Returns:
-            str: The decoded secret message.
+            bytes: The extracted binary payload.
 
         Raises:
             FormatError: If the input path is not a valid PNG.
-            SteganographyError: If no hidden message delimiter is found or decoding fails.
+            SteganographyError: If the image contains no valid hidden data.
         """
         in_path = Path(input_image_path)
         cls._validate_png(in_path)
@@ -164,11 +162,15 @@ class LSBSteganography:
         current_byte = 0
         bit_index = 0
 
+        reading_length_header = True
+        payload_length = 0
+        bytes_read = 0
+
         with Image.open(in_path) as img:
             encoded_img = img.convert("RGB")
             width, height = encoded_img.size
+            max_payload_bytes = (width * height * 3) // 8 - 4
             
-            # Using load() to prevent loading millions of tuples into memory
             pixels = encoded_img.load()
 
             for y in range(height):
@@ -184,30 +186,38 @@ class LSBSteganography:
                             current_byte = 0
                             bit_index = 0
 
-                            # Check for the end of the message
-                            if extracted_bytes.endswith(cls.DELIMITER):
-                                payload = extracted_bytes[:-len(cls.DELIMITER)]
-                                try:
-                                    return payload.decode('utf-8')
-                                except UnicodeDecodeError as e:
-                                    raise SteganographyError(
-                                        "Data extracted successfully, but failed to decode as UTF-8."
-                                    ) from e
+                            # Phase 1: Read the 4-byte length prefix
+                            if reading_length_header:
+                                if len(extracted_bytes) == 4:
+                                    payload_length = struct.unpack(">I", extracted_bytes)[0]
+                                    
+                                    # Sanity check the length against image capacity
+                                    if payload_length == 0 or payload_length > max_payload_bytes:
+                                        raise SteganographyError(
+                                            "Invalid length header. This image does not "
+                                            "appear to contain StegoVault data."
+                                        )
+                                    
+                                    reading_length_header = False
+                                    extracted_bytes.clear()
 
-        raise SteganographyError(
-            "Delimiter not found. This image may not contain hidden data, "
-            "or the data was corrupted."
-        )
+                            # Phase 2: Read the actual payload
+                            else:
+                                bytes_read += 1
+                                if bytes_read == payload_length:
+                                    return bytes(extracted_bytes)
+
+        raise SteganographyError("Reached the end of the image before the payload was fully extracted.")
 
 
 # =====================================================================
-# Example Usage Block (Can be safely removed or used for testing)
+# Example Usage Block
 # =====================================================================
 if __name__ == "__main__":
     import tempfile
     import os
 
-    print("--- StegoVault LSB Core Engine Test ---")
+    print("--- StegoVault Generic LSB Engine Test ---")
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f_in, \
          tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f_out:
@@ -220,21 +230,22 @@ if __name__ == "__main__":
         img = Image.new("RGB", (200, 200), color=(50, 100, 200))
         img.save(carrier_path, format="PNG")
 
-        secret_message = "Memory-efficient embedding successful! 🚀"
-        print(f"Secret message to hide: '{secret_message}'")
+        # Test with raw, arbitrary bytes (e.g., simulating a compressed/encrypted payload)
+        test_payload = b"\x00\xFFGeneric Byte Stream!\x88\x12\x34"
+        print(f"[1] Raw payload to hide : {test_payload}")
 
-        LSBSteganography.encode_text(
+        LSBSteganography.encode_bytes(
             input_image_path=carrier_path,
-            text=secret_message,
+            payload=test_payload,
             output_image_path=stego_path
         )
-        print("-> Encoding successful.")
+        print("[2] Raw bytes encoded successfully.")
 
-        recovered_message = LSBSteganography.decode_text(input_image_path=stego_path)
-        print(f"-> Recovered message: '{recovered_message}'")
+        recovered_bytes = LSBSteganography.decode_bytes(input_image_path=stego_path)
+        print(f"[3] Recovered raw bytes : {recovered_bytes}")
 
-        assert secret_message == recovered_message
-        print("\n✅ SUCCESS: Tests passed!")
+        assert test_payload == recovered_bytes
+        print("\n✅ SUCCESS: Generic byte engine is working perfectly!")
 
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
