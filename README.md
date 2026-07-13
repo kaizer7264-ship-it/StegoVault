@@ -52,7 +52,7 @@ StegoVault/
 Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/StegoVault.git
+git clone https://github.com/kaizer7264-ship-it/StegoVault.git
 cd StegoVault
 ```
 
