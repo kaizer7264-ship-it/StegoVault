@@ -56,7 +56,7 @@ class FileManager:
             
         try:
             # Quick open/close to verify read permissions
-            with open(path, "rb") as f:
+            with open(path, "rb"):
                 pass
         except PermissionError as e:
             raise PermissionError(f"Permission denied when accessing: '{path}'") from e
@@ -202,7 +202,7 @@ if __name__ == "__main__":
         try:
             FileManager.write_file(temp_file, new_content, overwrite=False)
             print("    ❌ FAILED: It overwrote the file when it shouldn't have!")
-        except FileExistsError as e:
+        except FileExistsError:
             print("    ✅ SUCCESS: Blocked accidental overwrite.")
 
         # 3. Test Forced Overwrite (Should Succeed)

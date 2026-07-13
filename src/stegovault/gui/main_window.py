@@ -1,63 +1,79 @@
 """
-Main window module assembling the sidebar and page stack.
+Main Application Window.
+Coordinates the sidebar navigation and the stacked widget pages.
 """
 
-from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-from .sidebar import Sidebar
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QStackedWidget, QPushButton, QFrame, QLabel
+)
+
 from .pages import HomePage, HideDataPage, ExtractDataPage, SettingsPage, AboutPage
+from .styles import get_light_theme
 
 class StegoVaultMainWindow(QMainWindow):
-    """
-    The primary application window that holds the sidebar and manages the stacked widget navigation.
-    """
     def __init__(self) -> None:
-        """Initializes the main window, properties, and layout structure."""
         super().__init__()
         
         self.setWindowTitle("StegoVault v1.0.0")
-        self.resize(1300, 850)
-        self.setMinimumSize(900, 600)
+        self.resize(1000, 700)
         
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        # Apply the styling
+        self.setStyleSheet(get_light_theme())
         
-        self.main_layout = QHBoxLayout(self.central_widget)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
+        # Main container
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        self._setup_ui()
+        # Sidebar
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(200)
+        # Note: Sidebar color is defined by QFrame#Sidebar in styles.py, 
+        # but we ensure layout integrity here.
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 20, 10, 20)
+        sidebar_layout.setSpacing(10)
         
-    def _setup_ui(self) -> None:
-        """Configures the UI components and instantiates the page stack."""
-        self.sidebar = Sidebar()
-        self.stacked_widget = QStackedWidget()
+        # Logo/Title
+        title = QLabel("StegoVault")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #333; margin-bottom: 20px; padding-left: 10px;")
+        sidebar_layout.addWidget(title)
         
-        # Instantiate pages
-        self.home_page = HomePage()
-        self.hide_page = HideDataPage()
-        self.extract_page = ExtractDataPage()
-        self.settings_page = SettingsPage()
-        self.about_page = AboutPage()
+        # Navigation
+        self.pages = QStackedWidget()
         
-        # Add pages to stack
-        self.stacked_widget.addWidget(self.home_page)
-        self.stacked_widget.addWidget(self.hide_page)
-        self.stacked_widget.addWidget(self.extract_page)
-        self.stacked_widget.addWidget(self.settings_page)
-        self.stacked_widget.addWidget(self.about_page)
+        nav_buttons = [
+            ("Home", HomePage),
+            ("Hide Data", HideDataPage),
+            ("Extract Data", ExtractDataPage),
+            ("Settings", SettingsPage),
+            ("About", AboutPage)
+        ]
         
-        # Add to main layout
-        self.main_layout.addWidget(self.sidebar)
-        self.main_layout.addWidget(self.stacked_widget)
-        
-        # Connect signals
-        self.sidebar.page_requested.connect(self.switch_page)
-        
-    def switch_page(self, index: int) -> None:
-        """
-        Switches the visible page in the stacked widget.
-        
-        Args:
-            index (int): The target page index from the sidebar.
-        """
-        self.stacked_widget.setCurrentIndex(index)
+        for i, (name, page_class) in enumerate(nav_buttons):
+            btn = QPushButton(name)
+            # Custom style for navigation buttons
+            btn.setStyleSheet("""
+                QPushButton { 
+                    text-align: left; 
+                    padding: 12px; 
+                    border: none; 
+                    color: #555; 
+                    background: transparent;
+                }
+                QPushButton:hover { 
+                    background: #EFEFEF; 
+                    border-radius: 8px;
+                }
+            """)
+            btn.clicked.connect(lambda checked, index=i: self.pages.setCurrentIndex(index))
+            sidebar_layout.addWidget(btn)
+            self.pages.addWidget(page_class())
+            
+        sidebar_layout.addStretch()
+        main_layout.addWidget(sidebar)
+        main_layout.addWidget(self.pages)

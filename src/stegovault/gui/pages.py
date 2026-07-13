@@ -1,13 +1,20 @@
 """
 Application pages module containing individual screen views for the stacked widget.
+Wired to the StegoVault backend services for full end-to-end functionality.
 """
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QFrame, QGridLayout, QLineEdit, QComboBox, QProgressBar, 
-    QCheckBox, QSpacerItem, QSizePolicy, QFormLayout
+    QCheckBox, QSpacerItem, QSizePolicy, QFormLayout, QFileDialog, QMessageBox
 )
 from PySide6.QtCore import Qt
+
+# Backend Imports
+from stegovault.services.stego_service import StegoService
+from stegovault.core.capacity import ImageCapacity
+from stegovault.utils.exceptions import SteganographyError, CryptoError
+
 
 class BasePage(QWidget):
     """Base class for all application pages providing standard margins."""
@@ -16,6 +23,7 @@ class BasePage(QWidget):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(40, 40, 40, 40)
         self.main_layout.setSpacing(20)
+
 
 class HomePage(BasePage):
     """The landing page displaying welcome information and feature highlights."""
@@ -66,16 +74,20 @@ class HomePage(BasePage):
         status_header.setObjectName("HeaderLabel")
         self.main_layout.addWidget(status_header)
         
-        status_desc = QLabel("Crypto engine initialized. Awaiting user instructions.")
+        status_desc = QLabel("Crypto and LSB engines initialized. Ready for operation.")
         self.main_layout.addWidget(status_desc)
         
         self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+
 
 class HideDataPage(BasePage):
     """Page dedicated to concealing payloads within carrier images."""
     def __init__(self) -> None:
         super().__init__()
-        
+        self._setup_ui()
+        self._connect_signals()
+
+    def _setup_ui(self) -> None:
         title = QLabel("Hide Data")
         title.setObjectName("TitleLabel")
         self.main_layout.addWidget(title)
@@ -85,13 +97,13 @@ class HideDataPage(BasePage):
         
         # Image Selection
         self.img_path = QLineEdit()
-        self.img_path.setPlaceholderText("Select a carrier image...")
+        self.img_path.setPlaceholderText("Select a carrier image (*.png)...")
         self.img_path.setReadOnly(True)
-        img_btn = QPushButton("Browse Image")
+        self.img_btn = QPushButton("Browse Image")
         
         img_layout = QHBoxLayout()
         img_layout.addWidget(self.img_path)
-        img_layout.addWidget(img_btn)
+        img_layout.addWidget(self.img_btn)
         form_layout.addRow("Carrier Image:", img_layout)
         
         # Payload Type Selection
@@ -101,12 +113,13 @@ class HideDataPage(BasePage):
         
         # Payload Input
         self.payload_path = QLineEdit()
-        self.payload_path.setPlaceholderText("Select payload file or type message...")
-        payload_btn = QPushButton("Browse Payload")
+        self.payload_path.setPlaceholderText("Type your secret message here...")
+        self.payload_btn = QPushButton("Browse Payload")
+        self.payload_btn.setVisible(False) # Hidden by default for Text mode
         
         payload_layout = QHBoxLayout()
         payload_layout.addWidget(self.payload_path)
-        payload_layout.addWidget(payload_btn)
+        payload_layout.addWidget(self.payload_btn)
         form_layout.addRow("Payload Data:", payload_layout)
         
         # Security
@@ -124,7 +137,7 @@ class HideDataPage(BasePage):
         self.main_layout.addLayout(form_layout)
         
         # Status & Capacity
-        self.capacity_label = QLabel("Estimated Capacity: -- / --")
+        self.capacity_label = QLabel("Estimated Capacity: Awaiting Image")
         self.status_label = QLabel("Ready.")
         self.main_layout.addWidget(self.capacity_label)
         self.main_layout.addWidget(self.status_label)
@@ -149,11 +162,130 @@ class HideDataPage(BasePage):
         self.main_layout.addLayout(btn_layout)
         self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
+    def _connect_signals(self) -> None:
+        """Binds UI buttons to their respective controller methods."""
+        self.img_btn.clicked.connect(self._browse_image)
+        self.payload_btn.clicked.connect(self._browse_payload)
+        self.payload_type.currentIndexChanged.connect(self._toggle_payload_mode)
+        self.hide_btn.clicked.connect(self._execute_hide)
+        self.reset_btn.clicked.connect(self._reset_form)
+        self.encrypt_check.stateChanged.connect(self._toggle_encryption)
+
+    def _toggle_payload_mode(self, index: int) -> None:
+        """Adjusts the UI based on whether Text or File is selected."""
+        self.payload_path.clear()
+        if index == 0:  # Text Mode
+            self.payload_path.setReadOnly(False)
+            self.payload_path.setPlaceholderText("Type your secret message here...")
+            self.payload_btn.setVisible(False)
+        else:           # File Mode
+            self.payload_path.setReadOnly(True)
+            self.payload_path.setPlaceholderText("Select a file to hide...")
+            self.payload_btn.setVisible(True)
+
+    def _toggle_encryption(self, state: int) -> None:
+        """Enables or disables the password field based on the checkbox."""
+        self.password.setEnabled(self.encrypt_check.isChecked())
+
+    def _browse_image(self) -> None:
+        """Opens a file dialog to select the carrier PNG image."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Carrier Image", "", "PNG Images (*.png)"
+        )
+        if file_path:
+            self.img_path.setText(file_path)
+            self._update_capacity()
+
+    def _browse_payload(self) -> None:
+        """Opens a file dialog to select the payload file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Payload File", "", "All Files (*.*)"
+        )
+        if file_path:
+            self.payload_path.setText(file_path)
+
+    def _update_capacity(self) -> None:
+        """Updates the capacity label dynamically when an image is loaded."""
+        if not self.img_path.text():
+            return
+            
+        try:
+            info = ImageCapacity.calculate(self.img_path.text())
+            self.capacity_label.setText(f"Estimated Capacity: {info.formatted}")
+        except Exception:
+            self.capacity_label.setText("Estimated Capacity: Error reading image.")
+
+    def _execute_hide(self) -> None:
+        """Validates inputs and calls the backend StegoService to hide data."""
+        carrier = self.img_path.text()
+        payload_data = self.payload_path.text()
+        is_text = self.payload_type.currentIndex() == 0
+        encrypt = self.encrypt_check.isChecked()
+        pwd = self.password.text()
+
+        if not carrier:
+            QMessageBox.warning(self, "Validation Error", "Please select a carrier image.")
+            return
+        if not payload_data:
+            QMessageBox.warning(self, "Validation Error", "Please provide payload data.")
+            return
+        if encrypt and not pwd:
+            QMessageBox.warning(self, "Validation Error", "Please enter an encryption password.")
+            return
+
+        # Prompt user for where to save the final Stego Image
+        output_image, _ = QFileDialog.getSaveFileName(
+            self, "Save Stego Image As", "", "PNG Images (*.png)"
+        )
+        if not output_image:
+            return
+
+        self.status_label.setText("Processing... Please wait.")
+        self.progress_bar.setValue(50)
+        self.repaint()  # Force UI update before heavy lifting
+
+        try:
+            if is_text:
+                msg = StegoService.hide_text(carrier, payload_data, output_image, encrypt, pwd)
+            else:
+                msg = StegoService.hide_file(carrier, payload_data, output_image, encrypt, pwd)
+                
+            self.progress_bar.setValue(100)
+            self.status_label.setText("Operation Complete.")
+            QMessageBox.information(self, "Success", msg)
+            self._reset_form()
+            
+        except (SteganographyError, CryptoError, ValueError) as e:
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Operation Failed.")
+            QMessageBox.critical(self, "Error", str(e))
+        except Exception as e:
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Critical Error.")
+            QMessageBox.critical(self, "Critical Error", f"An unexpected error occurred:\n{e}")
+
+    def _reset_form(self) -> None:
+        """Clears all form inputs."""
+        self.img_path.clear()
+        self.payload_path.clear()
+        self.password.clear()
+        self.progress_bar.setValue(0)
+        self.capacity_label.setText("Estimated Capacity: Awaiting Image")
+        self.status_label.setText("Ready.")
+        if self.payload_type.currentIndex() == 0:
+            self.payload_path.setPlaceholderText("Type your secret message here...")
+        else:
+            self.payload_path.setPlaceholderText("Select a file to hide...")
+
+
 class ExtractDataPage(BasePage):
     """Page dedicated to extracting concealed payloads from carrier images."""
     def __init__(self) -> None:
         super().__init__()
-        
+        self._setup_ui()
+        self._connect_signals()
+
+    def _setup_ui(self) -> None:
         title = QLabel("Extract Data")
         title.setObjectName("TitleLabel")
         self.main_layout.addWidget(title)
@@ -164,11 +296,11 @@ class ExtractDataPage(BasePage):
         self.img_path = QLineEdit()
         self.img_path.setPlaceholderText("Select a carrier image containing hidden data...")
         self.img_path.setReadOnly(True)
-        img_btn = QPushButton("Browse Image")
+        self.img_btn = QPushButton("Browse Image")
         
         img_layout = QHBoxLayout()
         img_layout.addWidget(self.img_path)
-        img_layout.addWidget(img_btn)
+        img_layout.addWidget(self.img_btn)
         form_layout.addRow("Carrier Image:", img_layout)
         
         self.password = QLineEdit()
@@ -187,16 +319,66 @@ class ExtractDataPage(BasePage):
         self.main_layout.addWidget(self.progress_bar)
         
         btn_layout = QHBoxLayout()
-        self.open_folder_btn = QPushButton("Open Output Folder")
         self.extract_btn = QPushButton("Extract Data")
         self.extract_btn.setObjectName("PrimaryButton")
         self.extract_btn.setMinimumHeight(45)
         
-        btn_layout.addWidget(self.open_folder_btn)
         btn_layout.addWidget(self.extract_btn)
         
         self.main_layout.addLayout(btn_layout)
         self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+
+    def _connect_signals(self) -> None:
+        self.img_btn.clicked.connect(self._browse_image)
+        self.extract_btn.clicked.connect(self._execute_extract)
+
+    def _browse_image(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Stego Image", "", "PNG Images (*.png)"
+        )
+        if file_path:
+            self.img_path.setText(file_path)
+            self.status_label.setText("Image loaded. Ready for extraction.")
+
+    def _execute_extract(self) -> None:
+        carrier = self.img_path.text()
+        pwd = self.password.text()
+
+        if not carrier:
+            QMessageBox.warning(self, "Validation Error", "Please select an image to extract from.")
+            return
+
+        # Ask user where to save potential files
+        out_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory for Extracted Files")
+        if not out_dir:
+            return  # User cancelled
+
+        self.status_label.setText("Extracting... Please wait.")
+        self.progress_bar.setValue(50)
+        self.repaint()
+
+        try:
+            result = StegoService.extract(carrier, out_dir, pwd)
+            self.progress_bar.setValue(100)
+            self.status_label.setText("Extraction Complete.")
+            
+            # If the result is just text (no file was saved), show it in the prompt
+            if not result.startswith("File extracted successfully"):
+                QMessageBox.information(self, "Extracted Secret Text", f"Hidden Message:\n\n{result}")
+            else:
+                QMessageBox.information(self, "Success", result)
+                
+            self.password.clear()
+            
+        except (SteganographyError, CryptoError) as e:
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Extraction Failed.")
+            QMessageBox.critical(self, "Extraction Error", str(e))
+        except Exception as e:
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Critical Error.")
+            QMessageBox.critical(self, "Critical Error", f"An unexpected error occurred:\n{e}")
+
 
 class SettingsPage(BasePage):
     """Page for configuring application preferences."""
@@ -244,6 +426,7 @@ class SettingsPage(BasePage):
         
         self.main_layout.addLayout(save_layout)
         self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+
 
 class AboutPage(BasePage):
     """Page displaying application metadata, developer information, and licensing."""

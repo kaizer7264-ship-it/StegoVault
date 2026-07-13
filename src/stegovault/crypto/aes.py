@@ -188,7 +188,7 @@ if __name__ == "__main__":
         try:
             AESEncryption.decrypt(encrypted_result, user_password, aad=tampered_aad)
             print("    ❌ FAILED: Accepted tampered AAD?!")
-        except AuthenticationError as e:
+        except AuthenticationError:
             print("    ✅ SUCCESS: Blocked tampered AAD (Invalid GCM Tag).")
 
     except Exception as e:
