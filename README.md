@@ -22,7 +22,20 @@ Designed with a modular architecture and an intuitive graphical interface, Stego
 
 ## 📸 Screenshots
 
-Screenshots are available in the `screenshots/` directory.
+### Main Interface
+![Main Interface](screenshots/1.png)
+
+### Hide Text
+![Hide Text](screenshots/2.png)
+
+### Extract Text
+![Extract Text](screenshots/3.png)
+
+### Hide File
+![Hide File](screenshots/4.png)
+
+### Extract File
+![Extract File](screenshots/5.png)
 
 ---
 
