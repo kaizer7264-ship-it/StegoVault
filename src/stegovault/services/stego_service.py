@@ -173,7 +173,10 @@ class StegoService:
             
         elif metadata.payload_type == PayloadType.FILE:
             out_dir = Path(output_directory) if output_directory else Path.cwd()
-            out_file = out_dir / metadata.filename
+            
+            # SECURE EXTRACT: Strip any malicious path traversals (e.g. "../../../etc/passwd")
+            safe_filename = Path(metadata.filename).name
+            out_file = out_dir / safe_filename
             
             # Write out using FileManager (overwrite=True to prevent silent frontend failures)
             FileManager.write_file(out_file, payload_data, overwrite=True)
