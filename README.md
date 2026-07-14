@@ -1,4 +1,4 @@
-# 🔒 StegoVault
+# StegoVault
 
 **StegoVault** is a modern cross-platform desktop application for securely hiding sensitive information inside images using **Least Significant Bit (LSB) steganography** with optional **AES encryption**.
 
@@ -6,7 +6,7 @@ Designed with a modular architecture and an intuitive graphical interface, Stego
 
 ---
 
-## ✨ Features
+## Features
 
 * Hide secret text inside PNG images
 * Extract hidden text from images
@@ -20,7 +20,7 @@ Designed with a modular architecture and an intuitive graphical interface, Stego
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 ### Main Interface
 ![Main Interface](screenshots/1.png)
@@ -39,7 +39,7 @@ Designed with a modular architecture and an intuitive graphical interface, Stego
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 StegoVault/
@@ -60,7 +60,7 @@ StegoVault/
 
 ---
 
-## 🚀 Installation
+## Installation
 
 Clone the repository:
 
@@ -131,7 +131,7 @@ python src/stegovault/main.py
 2. Provide the password if required.
 3. Extract and save the embedded file.
 
-## 🔐 Technologies Used
+## Technologies Used
 
 * Python
 * PySide6
@@ -141,7 +141,7 @@ python src/stegovault/main.py
 
 ---
 
-## 📋 Requirements
+## Requirements
 
 * Python 3.12+
 * PySide6
@@ -150,19 +150,19 @@ python src/stegovault/main.py
 
 ---
 
-## 🛡️ Security Notice
+## Security Notice
 
 StegoVault is intended for educational purposes and legitimate privacy use. Users are responsible for complying with applicable laws and regulations when using this software.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License.
 
 ---
 
-## 👨‍💻 Author
+## Author
 
 **Muhammad Sami Butt**
 
