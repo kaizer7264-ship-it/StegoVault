@@ -102,7 +102,7 @@ python src/stegovault/main.py
 ```
 
 ---
-## 📖 Usage
+## Usage
 
 ### Hide Text
 
